@@ -1,118 +1,40 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
-    />
-    <meta name="referrer" content="strict-origin-when-cross-origin" />
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <style>
+        html, body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            background: #000;
+            overflow: hidden;
+        }
+        #youTubePlayer {
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+    <script src="https://www.youtube.com/iframe_api"></script>
+</head>
+<body>
+    <div id="youTubePlayer"></div>
+    <script>
+        const q = new URLSearchParams(location.search);
+        const videoId = q.get("videoId") || "";
+        const startAt = parseFloat(q.get("start") || "0");
 
-    <style>
-      html,
-      body {
-        width: 100%;
-        height: 100%;
-        margin: 0;
-        background: black;
-        overflow: hidden;
-      }
-
-      #youTubePlayer {
-        width: 100%;
-        height: 100%;
-        pointer-events: none; /* blocks hover UI */
-      }
-    </style>
-
-    <script src="https://www.youtube.com/iframe_api"></script>
-  </head>
-
-  <body>
-    <div id="youTubePlayer"></div>
-
-    <script>
-      const videoId = "_VOdGlyXYqw";
-      let player;
-
-      // :fire: ultra-aggressive UI hiding CSS
-      const HIDE_CSS = `
-    .ytp-chrome-top,
-    .ytp-chrome-bottom,
-    .ytp-gradient-top,
-    .ytp-gradient-bottom,
-    .ytp-watermark,
-    .ytp-title,
-    .ytp-title-text,
-    .ytp-title-channel,
-    .ytp-show-cards-title,
-    .ytp-ce-element,
-    .ytp-ce-covering-overlay,
-    .ytp-endscreen-content,
-    .ytp-pause-overlay,
-    .ytp-cued-thumbnail-overlay,
-    .ytp-large-play-button,
-    .ytp-share-button,
-    .ytp-watch-later-button,
-    .ytp-overflow-button,
-    .ytp-progress-bar-container {
-      display: none !important;
-      opacity: 0 !important;
-      pointer-events: none !important;
-    }
-  `;
-
-      function injectCSS() {
-        try {
-          const iframe = document.querySelector("#youTubePlayer iframe");
-          if (!iframe) return;
-
-          const doc = iframe.contentDocument || iframe.contentWindow.document;
-          if (!doc || doc.getElementById("clean-style")) return;
-
-          const style = document.createElement("style");
-          style.id = "clean-style";
-          style.textContent = HIDE_CSS;
-
-          doc.head.appendChild(style);
-        } catch (e) {
-          // cross-origin safe fallback (ignore errors)
-        }
-      }
-
-      function onYouTubeIframeAPIReady() {
-        player = new YT.Player("youTubePlayer", {
-          videoId: videoId,
-
-          playerVars: {
-            autoplay: 1,
-            controls: 0,
-            disablekb: 1,
-            fs: 0,
-            rel: 0,
-            modestbranding: 1,
-            iv_load_policy: 3,
-            playsinline: 1,
-            cc_load_policy: 0,
-          },
-
-          events: {
-            onReady: () => {
-              player.mute();
-              player.playVideo();
-
-              // start cleaning loop
-              setTimeout(() => {
-                injectCSS();
-                setInterval(injectCSS, 2000);
-              }, 1000);
-            },
-          },
-        });
-      }
-    </script>
-  </body>
-</html>        };
+        const STATES = {
+            [-1]: "UNSTARTED",
+            0: "ENDED",
+            1: "PLAYING",
+            2: "PAUSED",
+            3: "BUFFERING",
+            5: "CUED",
+        };
 
         let player, timer;
         let cssInjected = false;
@@ -159,61 +81,45 @@
 
         function log(msg) {
             console.log('[YT-DEBUG] ' + msg);
-            // Also send to Kotlin side via title so you can see in Android logs
-            document.title = "ytplayer://log?data=" + encodeURIComponent(msg);
         }
 
         function injectCSS() {
             log('injectCSS() called');
 
-            const allIframes = document.querySelectorAll('iframe');
-            log('total iframes on page: ' + allIframes.length);
-            allIframes.forEach((f, i) => {
-                log('iframe[' + i + '] src: ' + f.src);
-            });
-
             const iframe = document.querySelector('#youTubePlayer iframe');
             if (!iframe) {
-                log('ERROR: #youTubePlayer iframe not found, retrying in 300ms');
+                log('iframe not found, retrying...');
                 setTimeout(injectCSS, 300);
                 return;
             }
 
-            log('iframe found, src: ' + iframe.src);
+            log('iframe found: ' + iframe.src);
 
             try {
                 const doc = iframe.contentDocument || iframe.contentWindow.document;
 
                 if (!doc) {
-                    log('ERROR: doc is null, retrying...');
-                    cssInjected = false;
+                    log('doc is null, retrying...');
                     setTimeout(injectCSS, 300);
                     return;
                 }
 
-                log('doc accessed OK, readyState: ' + doc.readyState);
-                log('doc.head exists: ' + !!doc.head);
-                log('doc.body exists: ' + !!doc.body);
+                log('doc readyState: ' + doc.readyState);
 
                 if (doc.readyState !== 'complete') {
-                    log('doc not complete yet, retrying...');
+                    log('doc not complete, retrying...');
                     setTimeout(injectCSS, 300);
                     return;
                 }
 
-                // Log what elements exist in the iframe doc
-                const ytElements = doc.querySelectorAll('[class*="ytp-"]');
-                log('ytp- elements found in iframe: ' + ytElements.length);
-                ytElements.forEach((el, i) => {
-                    if (i < 20) log('  el[' + i + ']: ' + el.className);
+                const ytEls = doc.querySelectorAll('[class*="ytp-"]');
+                log('ytp- elements found: ' + ytEls.length);
+                ytEls.forEach((el, i) => {
+                    if (i < 10) log('  el[' + i + ']: ' + el.className);
                 });
 
-                // Remove old style if exists
                 const existing = doc.getElementById('yt-hide-css');
-                if (existing) {
-                    existing.remove();
-                    log('removed old style tag');
-                }
+                if (existing) existing.remove();
 
                 const style = doc.createElement('style');
                 style.id = 'yt-hide-css';
@@ -221,10 +127,10 @@
                 doc.head.appendChild(style);
 
                 cssInjected = true;
-                log('CSS injected successfully into iframe head');
+                log('CSS injected successfully!');
 
             } catch (e) {
-                log('CATCH ERROR: ' + e.message + ' | retrying...');
+                log('CATCH ERROR: ' + e.message);
                 cssInjected = false;
                 setTimeout(injectCSS, 300);
             }
@@ -255,26 +161,6 @@
                     onReady: (e) => {
                         log('onReady fired');
                         document.title = "ytplayer://onReady";
-
-                        // Debug: check iframe access after 3 seconds
-                        setTimeout(() => {
-                            log('--- 3s debug check ---');
-                            const iframe = document.querySelector('#youTubePlayer iframe');
-                            log('iframe found: ' + !!iframe);
-                            log('iframe src: ' + iframe?.src);
-                            try {
-                                const doc = iframe.contentDocument || iframe.contentWindow?.document;
-                                log('doc accessed: ' + !!doc);
-                                log('doc readyState: ' + doc?.readyState);
-                                log('doc.head: ' + !!doc?.head);
-                                log('doc.body: ' + !!doc?.body);
-                                const ytEls = doc?.querySelectorAll('[class*="ytp-"]');
-                                log('ytp- elements: ' + ytEls?.length);
-                            } catch(e) {
-                                log('3s ACCESS ERROR: ' + e.message);
-                            }
-                        }, 3000);
-
                         if (videoId) loadVideo(videoId, startAt);
                     },
                     onStateChange: (e) => {
@@ -282,18 +168,16 @@
                         stateChanged(e.data);
 
                         if (e.data === 1 && !cssInjected) {
-                            log('state PLAYING - triggering injectCSS');
+                            log('PLAYING - injecting CSS');
                             injectCSS();
                         }
-
                         if (e.data === 2) {
-                            log('state PAUSED - re-injecting CSS');
+                            log('PAUSED - re-injecting CSS');
                             cssInjected = false;
                             injectCSS();
                         }
-
                         if (e.data === 3) {
-                            log('state BUFFERING - re-injecting CSS');
+                            log('BUFFERING - re-injecting CSS');
                             cssInjected = false;
                             injectCSS();
                         }
@@ -326,402 +210,8 @@
         }
 
         function loadVideo(id, sec) {
-            log('loadVideo called: ' + id + ' at ' + sec);
+            log('loadVideo: ' + id + ' at ' + sec);
             cssInjected = false;
-            if (player && player.loadVideoById) {
-                player.loadVideoById(id, sec || 0);
-                document.title = "ytplayer://onVideoId?data=" + id;
-            }
-        }
-
-        function playVideo() {
-            if (player && player.playVideo) player.playVideo();
-        }
-
-        function pauseVideo() {
-            if (player && player.pauseVideo) player.pauseVideo();
-        }
-
-        function seekTo(s) {
-            if (player && player.seekTo) player.seekTo(s, true);
-        }
-
-        function mute() {
-            if (player && player.mute) player.mute();
-        }
-
-        function unMute() {
-            if (player && player.unMute) player.unMute();
-        }
-
-        function setVolume(volumePercent) {}
-
-        function setPlaybackRate(r) {
-            if (player && player.setPlaybackRate) player.setPlaybackRate(r);
-        }
-    </script>
-</body>
-</html>        };
-
-        let player, timer;
-        let cssInjected = false;
-
-        const HIDE_CSS = `
-            .ytp-chrome-top,
-            .ytp-gradient-top,
-            .ytp-title,
-            .ytp-title-text,
-            .ytp-title-link,
-            .ytp-chrome-bottom,
-            .ytp-gradient-bottom,
-            .ytp-watermark,
-            .ytp-pause-overlay,
-            .ytp-pause-overlay-container,
-            .ytp-cued-thumbnail-overlay,
-            .ytp-cued-thumbnail-overlay-image,
-            .ytp-endscreen-content,
-            .ytp-ce-element,
-            .ytp-ce-covering-overlay,
-            .ytp-cards-teaser,
-            .ytp-cards-button,
-            .ytp-large-play-button,
-            .ytp-share-button,
-            .ytp-watch-later-button,
-            .ytp-chrome-top-buttons,
-            .ytp-show-cards-title,
-            .ytp-autonav-endscreen-upnext-container,
-            .ytp-overflow-button,
-            .ytm-video-info-video-details-container,
-            .fullscreen-action-menu,
-            .ytwPlayerMiddleControlsHost,
-            .player-controls-middle,
-            .prevent-controls-collision,
-            .player-controls,
-            .player-overlay,
-            .player-controls-top,
-            .player-controls-bottom {
-                display: none !important;
-                opacity: 0 !important;
-                visibility: hidden !important;
-            }
-        `;
-
-        function injectCSS() {
-            const iframe = document.querySelector('#youTubePlayer iframe');
-            if (!iframe) {
-                setTimeout(injectCSS, 300);
-                return;
-            }
-
-            try {
-                const doc = iframe.contentDocument || iframe.contentWindow.document;
-                if (!doc || doc.readyState !== 'complete') {
-                    setTimeout(injectCSS, 300);
-                    return;
-                }
-
-                // Remove old style if exists, re-inject fresh
-                const existing = doc.getElementById('yt-hide-css');
-                if (existing) existing.remove();
-
-                const style = doc.createElement('style');
-                style.id = 'yt-hide-css';
-                style.textContent = HIDE_CSS;
-                doc.head.appendChild(style);
-
-                cssInjected = true;
-
-            } catch (e) {
-                console.warn('Injection failed, retrying...', e.message);
-                cssInjected = false;
-                setTimeout(injectCSS, 300);
-            }
-        }
-
-        function onYouTubeIframeAPIReady() {
-            player = new YT.Player("youTubePlayer", {
-                width: "100%",
-                height: "100%",
-                playerVars: {
-                    autoplay: 1,
-                    controls: 0,
-                    cc_load_policy: 0,
-                    fs: 1,
-                    iv_load_policy: 3,
-                    rel: 0,
-                    enablejsapi: 1,
-                    mute: 1,
-                    playsinline: 1,
-                    origin: location.origin,
-                    modestbranding: 1,
-                    disablekb: 1,
-                    showinfo: 0,
-                },
-                events: {
-                    onReady: (e) => {
-                        document.title = "ytplayer://onReady";
-                        if (videoId) loadVideo(videoId, startAt);
-                    },
-                    onStateChange: (e) => {
-                        stateChanged(e.data);
-
-                        // First time playing — inject CSS
-                        if (e.data === 1 && !cssInjected) {
-                            injectCSS();
-                        }
-
-                        // On pause — re-inject because pause overlay appears fresh
-                        if (e.data === 2) {
-                            cssInjected = false;
-                            injectCSS();
-                        }
-
-                        // On buffering — re-inject
-                        if (e.data === 3) {
-                            cssInjected = false;
-                            injectCSS();
-                        }
-                    },
-                    onError: (e) =>
-                        (document.title = "ytplayer://onError?data=" + e.data),
-                },
-            });
-        }
-
-        function stateChanged(s) {
-            clearInterval(timer);
-            document.title = "ytplayer://onStateChange?data=" + (STATES[s] || "");
-            if (s === 1) {
-                timer = setInterval(() => {
-                    try {
-                        document.title =
-                            "ytplayer://onCurrentTimeChange?data=" +
-                            player.getCurrentTime();
-                    } catch (e) {}
-                }, 200);
-                try {
-                    const d = player.getDuration();
-                    if (d > 0)
-                        document.title = "ytplayer://onVideoDuration?data=" + d;
-                } catch (e) {}
-            }
-        }
-
-        function loadVideo(id, sec) {
-            cssInjected = false;
-            if (player && player.loadVideoById) {
-                player.loadVideoById(id, sec || 0);
-                document.title = "ytplayer://onVideoId?data=" + id;
-            }
-        }
-
-        function playVideo() {
-            if (player && player.playVideo) player.playVideo();
-        }
-
-        function pauseVideo() {
-            if (player && player.pauseVideo) player.pauseVideo();
-        }
-
-        function seekTo(s) {
-            if (player && player.seekTo) player.seekTo(s, true);
-        }
-
-        function mute() {
-            if (player && player.mute) player.mute();
-        }
-
-        function unMute() {
-            if (player && player.unMute) player.unMute();
-        }
-
-        function setVolume(volumePercent) {}
-
-        function setPlaybackRate(r) {
-            if (player && player.setPlaybackRate) player.setPlaybackRate(r);
-        }
-    </script>
-</body>
-</html>            left: 0;
-            right: 0;
-            height: 60px;
-            background: #000;
-            z-index: 10;
-            pointer-events: none;
-        }
-
-        /* Bottom bar: progress bar + controls */
-        .overlay-bottom {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            height: 60px;
-            background: #000;
-            z-index: 10;
-            pointer-events: none;
-        }
-
-        /* YouTube watermark logo — bottom LEFT corner */
-        .overlay-logo-bottom-left {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            width: 150px;
-            height: 50px;
-            background: #000;
-            z-index: 10;
-            pointer-events: none;
-        }
-
-        /* YouTube watermark logo — bottom RIGHT corner */
-        .overlay-logo-bottom-right {
-            position: absolute;
-            bottom: 0;
-            right: 0;
-            width: 150px;
-            height: 50px;
-            background: #000;
-            z-index: 10;
-            pointer-events: none;
-        }
-
-        /* Top-right area: settings / fullscreen button */
-        .overlay-top-right {
-            position: absolute;
-            top: 0;
-            right: 0;
-            width: 120px;
-            height: 60px;
-            background: #000;
-            z-index: 10;
-            pointer-events: none;
-        }
-
-        /* Center large play button (shows on pause) */
-        .overlay-center-play {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 80px;
-            height: 80px;
-            background: transparent; /* Keep transparent so video shows */
-            z-index: 10;
-            pointer-events: none;
-        }
-
-        /* End screen / suggested videos (covers full player) */
-        .overlay-endscreen {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: transparent;
-            z-index: 9;
-            pointer-events: none;
-            display: none; /* Only shown on video end */
-        }
-
-        .overlay-endscreen.visible {
-            display: block;
-            background: #000;
-        }
-    </style>
-    <script src="https://www.youtube.com/iframe_api" async></script>
-</head>
-<body>
-    <div id="player-container">
-        <div id="youTubePlayer"></div>
-
-        <!-- Overlays that hide YouTube UI while keeping video visible -->
-        <div class="overlay-top"></div>
-        <div class="overlay-bottom"></div>
-        <div class="overlay-logo-bottom-left"></div>
-        <div class="overlay-logo-bottom-right"></div>
-        <div class="overlay-top-right"></div>
-        <div class="overlay-endscreen" id="endscreen-overlay"></div>
-    </div>
-
-    <script>
-        const q = new URLSearchParams(location.search);
-        const videoId = q.get("videoId") || "";
-        const startAt = parseFloat(q.get("start") || "0");
-
-        const STATES = {
-            [-1]: "UNSTARTED",
-            0: "ENDED",
-            1: "PLAYING",
-            2: "PAUSED",
-            3: "BUFFERING",
-            5: "CUED",
-        };
-
-        let player, timer;
-
-        function onYouTubeIframeAPIReady() {
-            player = new YT.Player("youTubePlayer", {
-                width: "100%",
-                height: "100%",
-                playerVars: {
-                    autoplay: 1,
-                    controls: 0,        // hides bottom control bar entirely
-                    cc_load_policy: 0,
-                    fs: 0,              // disable fullscreen (we handle it)
-                    iv_load_policy: 3,  // hide annotations
-                    rel: 0,
-                    enablejsapi: 1,
-                    mute: 1,
-                    playsinline: 1,
-                    origin: location.origin,
-                    modestbranding: 1,
-                    disablekb: 1,
-                    showinfo: 0,
-                },
-                events: {
-                    onReady: () => {
-                        document.title = "ytplayer://onReady";
-                        if (videoId) loadVideo(videoId, startAt);
-                    },
-                    onStateChange: (e) => stateChanged(e.data),
-                    onError: (e) =>
-                        (document.title = "ytplayer://onError?data=" + e.data),
-                },
-            });
-        }
-
-        function stateChanged(s) {
-            clearInterval(timer);
-            document.title = "ytplayer://onStateChange?data=" + (STATES[s] || "");
-
-            // Show black overlay on video end to hide YouTube's suggested videos
-            const endscreen = document.getElementById('endscreen-overlay');
-            if (s === 0) {
-                endscreen.classList.add('visible');
-            } else {
-                endscreen.classList.remove('visible');
-            }
-
-            if (s === 1) {
-                timer = setInterval(() => {
-                    try {
-                        document.title =
-                            "ytplayer://onCurrentTimeChange?data=" +
-                            player.getCurrentTime();
-                    } catch (e) {}
-                }, 200);
-                try {
-                    const d = player.getDuration();
-                    if (d > 0)
-                        document.title = "ytplayer://onVideoDuration?data=" + d;
-                } catch (e) {}
-            }
-        }
-
-        function loadVideo(id, sec) {
-            // Hide endscreen when new video loads
-            document.getElementById('endscreen-overlay').classList.remove('visible');
             if (player && player.loadVideoById) {
                 player.loadVideoById(id, sec || 0);
                 document.title = "ytplayer://onVideoId?data=" + id;
