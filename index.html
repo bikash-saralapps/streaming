@@ -1,170 +1,146 @@
 <!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover"
+    />
 
-<style>
-*,
-*::before,
-*::after {
-    box-sizing: border-box;
-    margin: 0;
-    padding: 0;
-}
+    <style>
+      *,
+      *::before,
+      *::after {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
 
-html,
-body {
-    width: 100%;
-    height: 100%;
-    height: 100vh;
-    overflow: hidden;
-    background: #000;
-    position: fixed;
-    top: 0;
-    left: 0;
-    overscroll-behavior: none;
-}
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #000;
+        position: fixed;
+        inset: 0;
+      }
 
-#clip {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    height: 100vh;
-    overflow: hidden;
-    z-index: 1;
-    background: #000;
-}
+      #app {
+        width: 100%;
+        height: 100%;
+        position: relative;
+        background: #000;
+      }
 
-#player {
-    position: absolute;
-    top: -58px;
-    left: 0;
-    width: 100%;
-    height: calc(100% + 58px);
-    height: calc(100vh + 58px);
-}
+      iframe {
+        width: 100%;
+        height: 100%;
+        border: none;
+        pointer-events: none;
+      }
 
-iframe {
-    width: 100%;
-    height: 100%;
-    border: none;
-    pointer-events: none;
-    user-select: none;
-    -webkit-user-select: none;
-    -webkit-touch-callout: none;
-}
+      /* black flash remover */
+      #loadingOverlay {
+        position: fixed;
+        inset: 0;
+        background: #000;
+        z-index: 9999;
+        transition: opacity 0.25s ease;
+      }
 
-.loading-bg {
-    position: fixed;
-    inset: 0;
-    background: #000;
-    z-index: 9999;
-    transition: opacity 0.28s ease;
-    pointer-events: none;
-}
+      #loadingOverlay.hidden {
+        opacity: 0;
+      }
 
-.loading-bg.hide {
-    opacity: 0;
-    pointer-events: none;
-}
+      /* blocks taps so UI never reappears */
+      #touchShield {
+        position: fixed;
+        inset: 0;
+        z-index: 9998;
+        background: transparent;
+      }
+    </style>
 
-.touch-block {
-    position: fixed;
-    inset: 0;
-    z-index: 9998;
-    background: transparent;
-    pointer-events: auto;
-}
-</style>
+    <script src="https://www.youtube.com/iframe_api"></script>
+  </head>
 
-<script src="https://www.youtube.com/iframe_api"></script>
-</head>
+  <body>
+    <div id="app"></div>
+    <div id="loadingOverlay"></div>
+    <div id="touchShield"></div>
 
-<body>
-<div class="loading-bg" id="loading"></div>
+    <script>
+      (function () {
+        const VIDEO_ID = "_VOdGlyXYqw";
 
-<div id="clip">
-    <div id="player"></div>
-</div>
+        let player;
+        let loadingHidden = false;
 
-<div class="touch-block" id="touchBlock"></div>
+        const loading = document.getElementById("loadingOverlay");
 
-<script>
-(function() {
-    let player;
-    let loadingHidden = false;
-    const LOADING_ID = 'loading';
+        function hideLoading() {
+          if (loadingHidden) return;
+          loadingHidden = true;
+          loading.classList.add("hidden");
+        }
 
-    function hideLoading() {
-        if (loadingHidden) return;
-        loadingHidden = true;
-        const el = document.getElementById(LOADING_ID);
-        if (el) el.classList.add('hide');
-    }
+        function createPlayer() {
+          const div = document.createElement("div");
+          div.id = "player";
+          document.getElementById("app").appendChild(div);
 
-    const maxLoadingTimer = setTimeout(hideLoading, 4000);
+          player = new YT.Player("player", {
+            videoId: VIDEO_ID,
 
-    window.onYouTubeIframeAPIReady = function() {
-        player = new YT.Player('player', {
-            videoId: '_VOdGlyXYqw',
             playerVars: {
-                autoplay: 1,
-                controls: 0,
-                modestbranding: 1,
-                rel: 0,
-                fs: 0,
-                disablekb: 1,
-                iv_load_policy: 3,
-                playsinline: 1,
-                mute: 1,
-                showinfo: 0,
-                enablejsapi: 1,
-                origin: window.location.origin,
-                widgetid: 1
+              autoplay: 1,
+              controls: 0,
+              rel: 0,
+              fs: 0,
+              disablekb: 1,
+              iv_load_policy: 3,
+              playsinline: 1,
+              mute: 1,
             },
+
             events: {
-                onReady: function(event) {
-                    event.target.playVideo();
-                    setTimeout(hideLoading, 180);
-                },
-                onStateChange: function(event) {
-                    if (event.data === YT.PlayerState.ENDED) {
-                        player.playVideo();
-                    }
+              onReady: (e) => {
+                e.target.playVideo();
+                setTimeout(hideLoading, 150);
+              },
 
-                    if (event.data === YT.PlayerState.PAUSED) {
-                        setTimeout(() => {
-                            if (player.getPlayerState() === YT.PlayerState.PAUSED) {
-                                player.playVideo();
-                            }
-                        }, 60);
-                    }
 
-                    if (event.data === YT.PlayerState.PLAYING) {
-                        hideLoading();
-                        clearTimeout(maxLoadingTimer);
-                    }
-                },
-                onError: function() {
-                    hideLoading();
-                    clearTimeout(maxLoadingTimer);
+
+              onStateChange: (e) => {
+                // loop video
+                if (e.data === YT.PlayerState.ENDED) {
+                  player.playVideo();
                 }
-            }
-        });
-    };
 
-    window.addEventListener('load', function() {
-        setTimeout(function() {
-            if (!loadingHidden) {
-                hideLoading();
-                clearTimeout(maxLoadingTimer);
-            }
-        }, 2500);
-    });
-})();
-</script>
-</body>
+                // only act ON FIRST PLAY
+                if (e.data === YT.PlayerState.PLAYING) {
+                  hideLoading();
+                }
+
+                // IMPORTANT:
+                // DO NOT handle PAUSED anymore
+                // (this is what causes title UI to reappear)
+              },
+
+            },
+
+          });
+        }
+        setInterval(() => {
+  const state = player?.getPlayerState?.();
+  if (state === YT.PlayerState.PAUSED) {
+    player.playVideo();
+  }
+}, 500);
+
+        window.onYouTubeIframeAPIReady = createPlayer;
+      })();
+    </script>
+  </body>
 </html>
