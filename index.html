@@ -1,36 +1,159 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
+<meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
 <style>
+*, *::before, *::after { box-sizing: border-box; }
+
 html, body {
+  margin: 0;
+  padding: 0;
   width: 100%;
   height: 100%;
-  margin: 0;
   background: #000;
   overflow: hidden;
 }
 
-#youTubePlayer {
-  width: 100%;
-  height: 100%;
+/* Crop zone — clips anything outside */
+#crop {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: #000;
 }
 
-/* 🔥 ultra-fast overlay (blocks ALL title flash) */
-#overlay {
+/*
+  Scale the iframe larger than the viewport so:
+  - YouTube title bar (top ~60px of iframe) is above the crop boundary
+  - YouTube control bar (bottom ~60px) is below the crop boundary
+  Both are invisible. We shift it up to center the video content.
+*/
+#player {
+  position: absolute;
+  /* push left/right equally */
+  left: -15%;
+  width: 130%;
+  /* extra height to hide top+bottom bars */
+  top: -10%;
+  height: 120%;
+  pointer-events: none; /* no tap-through to YouTube UI */
+}
+
+/* Controls overlay — your own UI */
+#controls {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: linear-gradient(transparent, rgba(0,0,0,0.7));
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+
+#controls.visible { opacity: 1; }
+
+#play-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.85);
+  background: rgba(255,255,255,0.12);
+  color: #fff;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s;
+}
+#play-btn:active { background: rgba(255,255,255,0.25); }
+
+#progress-wrap {
+  flex: 1;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#progress-track {
+  width: 100%;
+  height: 3px;
+  background: rgba(255,255,255,0.3);
+  border-radius: 2px;
+  position: relative;
+}
+
+#progress-fill {
+  height: 100%;
+  width: 0%;
+  background: #fff;
+  border-radius: 2px;
+  transition: width 0.4s linear;
+  pointer-events: none;
+}
+
+#progress-thumb {
+  position: absolute;
+  top: 50%;
+  left: 0%;
+  transform: translate(-50%, -50%);
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  pointer-events: none;
+}
+
+#time {
+  font-size: 12px;
+  color: rgba(255,255,255,0.8);
+  white-space: nowrap;
+  font-family: -apple-system, sans-serif;
+  min-width: 70px;
+  text-align: right;
+}
+
+/* Tap zone — fullscreen invisible tap target to show/hide controls */
+#tap-zone {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Loading */
+#loading {
   position: fixed;
   inset: 0;
   background: #000;
   z-index: 9999;
-  opacity: 1;
-  transition: opacity 0.15s ease;
+  transition: opacity 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
+#loading.hide { opacity: 0; pointer-events: none; }
 
-#overlay.hide {
-  opacity: 0;
+.spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid rgba(255,255,255,0.15);
+  border-top-color: rgba(255,255,255,0.8);
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
 }
+@keyframes spin { to { transform: rotate(360deg); } }
 </style>
 
 <script src="https://www.youtube.com/iframe_api"></script>
@@ -38,121 +161,182 @@ html, body {
 
 <body>
 
-<div id="youTubePlayer"></div>
-<div id="overlay"></div>
+<div id="crop">
+  <div id="player"></div>
+</div>
+
+<div id="tap-zone"></div>
+
+<div id="controls">
+  <button id="play-btn" aria-label="Play/Pause">&#9654;</button>
+  <div id="progress-wrap">
+    <div id="progress-track">
+      <div id="progress-fill"></div>
+      <div id="progress-thumb"></div>
+    </div>
+  </div>
+  <span id="time">0:00 / 0:00</span>
+</div>
+
+<div id="loading"><div class="spinner"></div></div>
 
 <script>
-const q = new URLSearchParams(location.search);
-const videoId = q.get("videoId") || "";
-const startAt = parseFloat(q.get("start") || "0");
-
-const STATES = {
-  [-1]: "UNSTARTED",
-  0: "ENDED",
-  1: "PLAYING",
-  2: "PAUSED",
-  3: "BUFFERING",
-  5: "CUED",
-};
-
 let player;
-let overlay = document.getElementById("overlay");
-let started = false;
+let isPlaying = false;
+let duration = 0;
+let progressInterval = null;
+let controlsTimer = null;
+let controlsVisible = false;
 
-function hideOverlayFast() {
-  overlay.classList.add("hide");
-  setTimeout(() => {
-    overlay.style.display = "none";
-  }, 150);
+const loading     = document.getElementById("loading");
+const controls    = document.getElementById("controls");
+const playBtn     = document.getElementById("play-btn");
+const fill        = document.getElementById("progress-fill");
+const thumb       = document.getElementById("progress-thumb");
+const timeLabel   = document.getElementById("time");
+const tapZone     = document.getElementById("tap-zone");
+const progressWrap= document.getElementById("progress-wrap");
+
+/* ── Helpers ──────────────────────────────────────── */
+
+function fmt(s) {
+  s = Math.floor(s);
+  const m = Math.floor(s / 60);
+  const sec = String(s % 60).padStart(2, "0");
+  return m + ":" + sec;
 }
 
-window.onYouTubeIframeAPIReady = function () {
-  player = new YT.Player("youTubePlayer", {
-    width: "100%",
-    height: "100%",
+function hideLoading() {
+  loading.classList.add("hide");
+}
+
+function setPlayIcon() {
+  playBtn.innerHTML = isPlaying ? "&#10074;&#10074;" : "&#9654;";
+  playBtn.setAttribute("aria-label", isPlaying ? "Pause" : "Play");
+}
+
+function startProgress() {
+  clearInterval(progressInterval);
+  progressInterval = setInterval(() => {
+    if (!player || !isPlaying) return;
+    const cur = player.getCurrentTime() || 0;
+    const pct = duration > 0 ? (cur / duration) * 100 : 0;
+    fill.style.width  = pct + "%";
+    thumb.style.left  = pct + "%";
+    timeLabel.textContent = fmt(cur) + " / " + fmt(duration);
+  }, 500);
+}
+
+function stopProgress() {
+  clearInterval(progressInterval);
+}
+
+/* ── Controls show/hide ───────────────────────────── */
+
+function showControls() {
+  controls.classList.add("visible");
+  controlsVisible = true;
+  clearTimeout(controlsTimer);
+  if (isPlaying) {
+    controlsTimer = setTimeout(hideControls, 3000);
+  }
+}
+
+function hideControls() {
+  controls.classList.remove("visible");
+  controlsVisible = false;
+}
+
+/* ── Tap zone ─────────────────────────────────────── */
+
+tapZone.addEventListener("click", () => {
+  if (!controlsVisible) {
+    showControls();
+  } else {
+    hideControls();
+  }
+});
+
+/* ── Play / Pause button ──────────────────────────── */
+
+playBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (!player) return;
+  if (isPlaying) {
+    player.pauseVideo();
+  } else {
+    player.playVideo();
+  }
+  showControls();
+});
+
+/* ── Seek on progress bar ─────────────────────────── */
+
+function seekTo(e) {
+  if (!player || !duration) return;
+  const rect = progressWrap.getBoundingClientRect();
+  const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+  const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+  player.seekTo(pct * duration, true);
+  fill.style.width  = (pct * 100) + "%";
+  thumb.style.left  = (pct * 100) + "%";
+}
+
+progressWrap.addEventListener("click",     (e) => { e.stopPropagation(); seekTo(e); });
+progressWrap.addEventListener("touchstart",(e) => { e.stopPropagation(); seekTo(e); }, { passive: true });
+
+/* ── YouTube API ──────────────────────────────────── */
+
+function onYouTubeIframeAPIReady() {
+  player = new YT.Player("player", {
+    videoId: "_VOdGlyXYqw",
     playerVars: {
-      autoplay: 1,
-      controls: 0,
-      rel: 0,
-      fs: 1,
+      autoplay:       1,
+      controls:       0,
+      rel:            0,
+      fs:             0,
+      disablekb:      1,
       iv_load_policy: 3,
-      playsinline: 1,
-      mute: 1,
-      disablekb: 1,
-      modestbranding: 1
+      playsinline:    1,
+      mute:           1,
+      modestbranding: 1,
+      origin:         window.location.origin
     },
-
     events: {
-      onReady: () => {
-        document.title = "ytplayer://onReady";
-        if (videoId) loadVideo(videoId, startAt);
-
-        // 🔥 INSTANT autoplay attempts
-        tryPlay();
-        setTimeout(tryPlay, 150);
-        setTimeout(tryPlay, 500);
+      onReady: (e) => {
+        e.target.mute();
+        e.target.playVideo();
+        duration = e.target.getDuration() || 0;
+        setTimeout(hideLoading, 150);
       },
-
-      onStateChange: (e) => stateChanged(e.data),
-
-      onError: (e) =>
-        document.title = "ytplayer://onError?data=" + e.data
+      onStateChange: (e) => {
+        const S = YT.PlayerState;
+        if (e.data === S.PLAYING) {
+          isPlaying = true;
+          hideLoading();
+          duration = player.getDuration() || duration;
+          setPlayIcon();
+          startProgress();
+          controlsTimer = setTimeout(hideControls, 2500);
+        }
+        if (e.data === S.PAUSED) {
+          isPlaying = false;
+          setPlayIcon();
+          stopProgress();
+          showControls();
+        }
+        if (e.data === S.BUFFERING) {
+          // keep current state visible, do nothing
+        }
+        if (e.data === S.ENDED) {
+          isPlaying = false;
+          setPlayIcon();
+          stopProgress();
+          player.playVideo(); // loop
+        }
+      }
     }
   });
-
-  // 🔥 hidden tap fallback (guaranteed mobile unlock)
-  document.body.addEventListener("touchstart", tryPlay, { once: true });
-};
-
-function tryPlay() {
-  if (!player || started) return;
-
-  try {
-    player.mute();
-    player.playVideo();
-    started = true;
-    hideOverlayFast(); // 🔥 fastest possible title removal
-  } catch (e) {}
-}
-
-function stateChanged(s) {
-  document.title = "ytplayer://onStateChange?data=" + (STATES[s] || "");
-
-  // 🔥 PLAYING → instantly hide overlay again (kills title flash)
-  if (s === 1) {
-    hideOverlayFast();
-
-    setInterval(() => {
-      try {
-        document.title =
-          "ytplayer://onCurrentTimeChange?data=" +
-          player.getCurrentTime();
-      } catch (e) {}
-    }, 300);
-  }
-
-  // 🔥 LOOP VIDEO
-  if (s === 0) {
-    player.playVideo();
-  }
-
-  // 🔥 IMPORTANT FIX:
-  // If PAUSED → instantly resume (prevents title UI reappearing)
-  if (s === 2) {
-    hideOverlayFast(); // keep screen black during state switch
-
-    setTimeout(() => {
-      try {
-        player.playVideo();
-      } catch (e) {}
-    }, 80);
-  }
-}
-
-function loadVideo(id, sec) {
-  if (player && player.loadVideoById) {
-    player.loadVideoById(id, sec || 0);
-  }
 }
 </script>
 
