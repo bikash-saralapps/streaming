@@ -1,245 +1,170 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-    <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-        <meta name="referrer" content="strict-origin-when-cross-origin">
-        <style>
-      html, body {
-        width: 100%;
-        height: 100%;
-        margin: 0;
-        padding: 0;
-        background: #000;
-        overflow: hidden;
-      }
-      #youTubePlayer {
-        width: 100%;
-        height: 100%;
-      }
-        </style>
-        <script src="https://www.youtube.com/iframe_api" async></script>
-    </head>
-    <body>
-        <div id="youTubePlayer"></div>
-        <script>
-      const q = new URLSearchParams(location.search);
-      const videoId = q.get("videoId") || "";
-      const startAt = parseFloat(q.get("start") || "0");
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
 
-      const STATES = {
-        [-1]: "UNSTARTED",
-        0: "ENDED",
-        1: "PLAYING",
-        2: "PAUSED",
-        3: "BUFFERING",
-        5: "CUED",
-      };
+<style>
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
 
-      let player, timer;
+html,
+body {
+    width: 100%;
+    height: 100%;
+    height: 100vh;
+    overflow: hidden;
+    background: #000;
+    position: fixed;
+    top: 0;
+    left: 0;
+    overscroll-behavior: none;
+}
 
-      // ─── CSS to inject into the YouTube iframe ───────────────────────────────
-      const HIDE_CSS = `
-        /* Top bar: title, channel name, gradient */
-        .ytp-chrome-top,
-        .ytp-gradient-top,
-        .ytp-show-cards-title,
-        .ytp-title,
-        .ytp-title-text,
-        .ytp-title-link,
-        .ytp-title-channel,
-        .ytp-title-beacon,
+#clip {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    height: 100vh;
+    overflow: hidden;
+    z-index: 1;
+    background: #000;
+}
 
-        /* Bottom bar: controls, progress, gradient */
-        .ytp-chrome-bottom,
-        .ytp-gradient-bottom,
+#player {
+    position: absolute;
+    top: -58px;
+    left: 0;
+    width: 100%;
+    height: calc(100% + 58px);
+    height: calc(100vh + 58px);
+}
 
-        /* YouTube watermark / logo (bottom-left) */
-        .ytp-watermark,
+iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+}
 
-        /* Pause overlay (logo shown when paused) */
-        .ytp-pause-overlay,
-        .ytp-pause-overlay-container,
+.loading-bg {
+    position: fixed;
+    inset: 0;
+    background: #000;
+    z-index: 9999;
+    transition: opacity 0.28s ease;
+    pointer-events: none;
+}
 
-        /* Cued/thumbnail overlay before play */
-        .ytp-cued-thumbnail-overlay,
-        .ytp-cued-thumbnail-overlay-image,
+.loading-bg.hide {
+    opacity: 0;
+    pointer-events: none;
+}
 
-        /* End screen suggested videos */
-        .ytp-endscreen-content,
-        .ytp-ce-element,
-        .ytp-ce-covering-overlay,
-        .ytp-ce-element-shadow,
+.touch-block {
+    position: fixed;
+    inset: 0;
+    z-index: 9998;
+    background: transparent;
+    pointer-events: auto;
+}
+</style>
 
-        /* Info cards */
-        .ytp-cards-teaser,
-        .ytp-cards-button,
+<script src="https://www.youtube.com/iframe_api"></script>
+</head>
 
-        /* Large center play button */
-        .ytp-large-play-button,
+<body>
+<div class="loading-bg" id="loading"></div>
 
-        /* Branding on mobile YouTube player */
-        .ytp-chrome-top-buttons,
+<div id="clip">
+    <div id="player"></div>
+</div>
 
-        /* Share / more-options buttons in top bar */
-        .ytp-share-button,
-        .ytp-watch-later-button,
+<div class="touch-block" id="touchBlock"></div>
 
-        /* "More videos" panel */
-        .ytp-autonav-endscreen-upnext-container,
+<script>
+(function() {
+    let player;
+    let loadingHidden = false;
+    const LOADING_ID = 'loading';
 
-        /* YouTube Shorts and info overlays */
-        .ytp-fullerscreen-edu-button,
-        .ytp-overflow-button,
+    function hideLoading() {
+        if (loadingHidden) return;
+        loadingHidden = true;
+        const el = document.getElementById(LOADING_ID);
+        if (el) el.classList.add('hide');
+    }
 
-        /* Mobile-specific overlays you mentioned */
-        .ytm-video-info-video-details-container,
-        .fullscreen-action-menu,
-        .ytwPlayerMiddleControlsHost,
-        .player-controls-middle,
-        .prevent-controls-collision,
-        .player-controls,
-        .player-overlay,
-        .player-controls-top,
-        .player-controls-bottom {
-          display: none !important;
-          opacity: 0 !important;
-          pointer-events: none !important;
-        }
-      `;
+    const maxLoadingTimer = setTimeout(hideLoading, 4000);
 
-      // ─── Inject CSS into the YouTube iframe once it exists ───────────────────
-      function injectCSSIntoYTFrame() {
-        // YouTube IFrame API creates an <iframe> inside #youTubePlayer
-        const iframe = document.querySelector('#youTubePlayer iframe');
-        if (!iframe) return false;
-
-        try {
-          const doc = iframe.contentDocument || iframe.contentWindow?.document;
-          if (!doc || !doc.head) return false;
-
-          // Avoid double-injection
-          if (doc.getElementById('yt-hide-style')) return true;
-
-          const style = document.createElement('style');
-          style.id = 'yt-hide-style';
-          style.textContent = HIDE_CSS;
-          doc.head.appendChild(style);
-
-          return true;
-        } catch (e) {
-          // Cross-origin block — shouldn't happen here since we're the parent page
-          console.warn('CSS injection failed:', e);
-          return false;
-        }
-      }
-
-      // ─── Keep trying until injection succeeds, then re-apply periodically ────
-      // (YouTube dynamically adds/removes elements, so we reapply every 2s)
-      function startHideLoop() {
-        // Try immediately
-        if (injectCSSIntoYTFrame()) {
-          // Success — but keep reapplying in case YouTube re-renders its DOM
-          setInterval(injectCSSIntoYTFrame, 2000);
-        } else {
-          // iframe not ready yet — poll until it is
-          const poll = setInterval(() => {
-            if (injectCSSIntoYTFrame()) {
-              clearInterval(poll);
-              setInterval(injectCSSIntoYTFrame, 2000);
-            }
-          }, 200);
-        }
-      }
-
-      function onYouTubeIframeAPIReady() {
-        player = new YT.Player("youTubePlayer", {
-          width: "100%",
-          height: "100%",
-          playerVars: {
-            autoplay: 1,
-            controls: 0,
-            cc_load_policy: 0,
-            fs: 1,
-            iv_load_policy: 3,
-            rel: 0,
-            enablejsapi: 1,
-            mute: 1,
-            playsinline: 1,
-            origin: location.origin,
-            modestbranding: 1,
-            disablekb: 1,
-            showinfo: 0,
-          },
-          events: {
-            onReady: (e) => {
-              document.title = "ytplayer://onReady";
-              if (videoId) loadVideo(videoId, startAt);
-              // Start hiding after player is ready
-              startHideLoop();
+    window.onYouTubeIframeAPIReady = function() {
+        player = new YT.Player('player', {
+            videoId: '_VOdGlyXYqw',
+            playerVars: {
+                autoplay: 1,
+                controls: 0,
+                modestbranding: 1,
+                rel: 0,
+                fs: 0,
+                disablekb: 1,
+                iv_load_policy: 3,
+                playsinline: 1,
+                mute: 1,
+                showinfo: 0,
+                enablejsapi: 1,
+                origin: window.location.origin,
+                widgetid: 1
             },
-            onStateChange: (e) => stateChanged(e.data),
-            onError: (e) =>
-              (document.title = "ytplayer://onError?data=" + e.data),
-          },
+            events: {
+                onReady: function(event) {
+                    event.target.playVideo();
+                    setTimeout(hideLoading, 180);
+                },
+                onStateChange: function(event) {
+                    if (event.data === YT.PlayerState.ENDED) {
+                        player.playVideo();
+                    }
+
+                    if (event.data === YT.PlayerState.PAUSED) {
+                        setTimeout(() => {
+                            if (player.getPlayerState() === YT.PlayerState.PAUSED) {
+                                player.playVideo();
+                            }
+                        }, 60);
+                    }
+
+                    if (event.data === YT.PlayerState.PLAYING) {
+                        hideLoading();
+                        clearTimeout(maxLoadingTimer);
+                    }
+                },
+                onError: function() {
+                    hideLoading();
+                    clearTimeout(maxLoadingTimer);
+                }
+            }
         });
-      }
+    };
 
-      function stateChanged(s) {
-        clearInterval(timer);
-        document.title = "ytplayer://onStateChange?data=" + (STATES[s] || "");
-        if (s === 1) {
-          timer = setInterval(() => {
-            try {
-              document.title =
-                "ytplayer://onCurrentTimeChange?data=" +
-                player.getCurrentTime();
-            } catch (e) {}
-          }, 200);
-          try {
-            const d = player.getDuration();
-            if (d > 0)
-              document.title = "ytplayer://onVideoDuration?data=" + d;
-          } catch (e) {}
-        }
-        // Re-inject on every state change (pause overlay appears on pause, etc.)
-        injectCSSIntoYTFrame();
-      }
-
-      function loadVideo(id, sec) {
-        if (player && player.loadVideoById) {
-          player.loadVideoById(id, sec || 0);
-          document.title = "ytplayer://onVideoId?data=" + id;
-        }
-      }
-
-      function playVideo() {
-        if (player && player.playVideo) player.playVideo();
-      }
-
-      function pauseVideo() {
-        if (player && player.pauseVideo) player.pauseVideo();
-      }
-
-      function seekTo(s) {
-        if (player && player.seekTo) player.seekTo(s, true);
-      }
-
-      function mute() {
-        if (player && player.mute) player.mute();
-      }
-
-      function unMute() {
-        if (player && player.unMute) player.unMute();
-      }
-
-      function setVolume(volumePercent) {
-        // your existing implementation
-      }
-
-      function setPlaybackRate(r) {
-        if (player && player.setPlaybackRate) player.setPlaybackRate(r);
-      }
-        </script>
-    </body>
+    window.addEventListener('load', function() {
+        setTimeout(function() {
+            if (!loadingHidden) {
+                hideLoading();
+                clearTimeout(maxLoadingTimer);
+            }
+        }, 2500);
+    });
+})();
+</script>
+</body>
 </html>
