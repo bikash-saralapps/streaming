@@ -1,245 +1,250 @@
 <!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-        <meta name="referrer" content="strict-origin-when-cross-origin">
-        <style>
-      html, body {
-        width: 100%;
-        height: 100%;
-        margin: 0;
-        padding: 0;
-        background: #000;
-        overflow: hidden;
-      }
-      #youTubePlayer {
-        width: 100%;
-        height: 100%;
-      }
-        </style>
-        <script src="https://www.youtube.com/iframe_api" async></script>
-    </head>
-    <body>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <style>
+        html, body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            background: #000;
+            overflow: hidden;
+        }
+
+        #player-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+        }
+
+        #youTubePlayer {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+
+        /* All overlay blocks: pointer-events none so taps still reach the iframe */
+
+        /* Top bar: video title + channel name */
+        .overlay-top {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 60px;
+            background: #000;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        /* Bottom bar: progress bar + controls */
+        .overlay-bottom {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 60px;
+            background: #000;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        /* YouTube watermark logo — bottom LEFT corner */
+        .overlay-logo-bottom-left {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 150px;
+            height: 50px;
+            background: #000;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        /* YouTube watermark logo — bottom RIGHT corner */
+        .overlay-logo-bottom-right {
+            position: absolute;
+            bottom: 0;
+            right: 0;
+            width: 150px;
+            height: 50px;
+            background: #000;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        /* Top-right area: settings / fullscreen button */
+        .overlay-top-right {
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 120px;
+            height: 60px;
+            background: #000;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        /* Center large play button (shows on pause) */
+        .overlay-center-play {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80px;
+            height: 80px;
+            background: transparent; /* Keep transparent so video shows */
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        /* End screen / suggested videos (covers full player) */
+        .overlay-endscreen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: transparent;
+            z-index: 9;
+            pointer-events: none;
+            display: none; /* Only shown on video end */
+        }
+
+        .overlay-endscreen.visible {
+            display: block;
+            background: #000;
+        }
+    </style>
+    <script src="https://www.youtube.com/iframe_api" async></script>
+</head>
+<body>
+    <div id="player-container">
         <div id="youTubePlayer"></div>
-        <script>
-      const q = new URLSearchParams(location.search);
-      const videoId = q.get("videoId") || "";
-      const startAt = parseFloat(q.get("start") || "0");
 
-      const STATES = {
-        [-1]: "UNSTARTED",
-        0: "ENDED",
-        1: "PLAYING",
-        2: "PAUSED",
-        3: "BUFFERING",
-        5: "CUED",
-      };
+        <!-- Overlays that hide YouTube UI while keeping video visible -->
+        <div class="overlay-top"></div>
+        <div class="overlay-bottom"></div>
+        <div class="overlay-logo-bottom-left"></div>
+        <div class="overlay-logo-bottom-right"></div>
+        <div class="overlay-top-right"></div>
+        <div class="overlay-endscreen" id="endscreen-overlay"></div>
+    </div>
 
-      let player, timer;
+    <script>
+        const q = new URLSearchParams(location.search);
+        const videoId = q.get("videoId") || "";
+        const startAt = parseFloat(q.get("start") || "0");
 
-      // ─── CSS to inject into the YouTube iframe ───────────────────────────────
-      const HIDE_CSS = `
-        /* Top bar: title, channel name, gradient */
-        .ytp-chrome-top,
-        .ytp-gradient-top,
-        .ytp-show-cards-title,
-        .ytp-title,
-        .ytp-title-text,
-        .ytp-title-link,
-        .ytp-title-channel,
-        .ytp-title-beacon,
+        const STATES = {
+            [-1]: "UNSTARTED",
+            0: "ENDED",
+            1: "PLAYING",
+            2: "PAUSED",
+            3: "BUFFERING",
+            5: "CUED",
+        };
 
-        /* Bottom bar: controls, progress, gradient */
-        .ytp-chrome-bottom,
-        .ytp-gradient-bottom,
+        let player, timer;
 
-        /* YouTube watermark / logo (bottom-left) */
-        .ytp-watermark,
-
-        /* Pause overlay (logo shown when paused) */
-        .ytp-pause-overlay,
-        .ytp-pause-overlay-container,
-
-        /* Cued/thumbnail overlay before play */
-        .ytp-cued-thumbnail-overlay,
-        .ytp-cued-thumbnail-overlay-image,
-
-        /* End screen suggested videos */
-        .ytp-endscreen-content,
-        .ytp-ce-element,
-        .ytp-ce-covering-overlay,
-        .ytp-ce-element-shadow,
-
-        /* Info cards */
-        .ytp-cards-teaser,
-        .ytp-cards-button,
-
-        /* Large center play button */
-        .ytp-large-play-button,
-
-        /* Branding on mobile YouTube player */
-        .ytp-chrome-top-buttons,
-
-        /* Share / more-options buttons in top bar */
-        .ytp-share-button,
-        .ytp-watch-later-button,
-
-        /* "More videos" panel */
-        .ytp-autonav-endscreen-upnext-container,
-
-        /* YouTube Shorts and info overlays */
-        .ytp-fullerscreen-edu-button,
-        .ytp-overflow-button,
-
-        /* Mobile-specific overlays you mentioned */
-        .ytm-video-info-video-details-container,
-        .fullscreen-action-menu,
-        .ytwPlayerMiddleControlsHost,
-        .player-controls-middle,
-        .prevent-controls-collision,
-        .player-controls,
-        .player-overlay,
-        .player-controls-top,
-        .player-controls-bottom {
-          display: none !important;
-          opacity: 0 !important;
-          pointer-events: none !important;
+        function onYouTubeIframeAPIReady() {
+            player = new YT.Player("youTubePlayer", {
+                width: "100%",
+                height: "100%",
+                playerVars: {
+                    autoplay: 1,
+                    controls: 0,        // hides bottom control bar entirely
+                    cc_load_policy: 0,
+                    fs: 0,              // disable fullscreen (we handle it)
+                    iv_load_policy: 3,  // hide annotations
+                    rel: 0,
+                    enablejsapi: 1,
+                    mute: 1,
+                    playsinline: 1,
+                    origin: location.origin,
+                    modestbranding: 1,
+                    disablekb: 1,
+                    showinfo: 0,
+                },
+                events: {
+                    onReady: () => {
+                        document.title = "ytplayer://onReady";
+                        if (videoId) loadVideo(videoId, startAt);
+                    },
+                    onStateChange: (e) => stateChanged(e.data),
+                    onError: (e) =>
+                        (document.title = "ytplayer://onError?data=" + e.data),
+                },
+            });
         }
-      `;
 
-      // ─── Inject CSS into the YouTube iframe once it exists ───────────────────
-      function injectCSSIntoYTFrame() {
-        // YouTube IFrame API creates an <iframe> inside #youTubePlayer
-        const iframe = document.querySelector('#youTubePlayer iframe');
-        if (!iframe) return false;
+        function stateChanged(s) {
+            clearInterval(timer);
+            document.title = "ytplayer://onStateChange?data=" + (STATES[s] || "");
 
-        try {
-          const doc = iframe.contentDocument || iframe.contentWindow?.document;
-          if (!doc || !doc.head) return false;
-
-          // Avoid double-injection
-          if (doc.getElementById('yt-hide-style')) return true;
-
-          const style = document.createElement('style');
-          style.id = 'yt-hide-style';
-          style.textContent = HIDE_CSS;
-          doc.head.appendChild(style);
-
-          return true;
-        } catch (e) {
-          // Cross-origin block — shouldn't happen here since we're the parent page
-          console.warn('CSS injection failed:', e);
-          return false;
-        }
-      }
-
-      // ─── Keep trying until injection succeeds, then re-apply periodically ────
-      // (YouTube dynamically adds/removes elements, so we reapply every 2s)
-      function startHideLoop() {
-        // Try immediately
-        if (injectCSSIntoYTFrame()) {
-          // Success — but keep reapplying in case YouTube re-renders its DOM
-          setInterval(injectCSSIntoYTFrame, 2000);
-        } else {
-          // iframe not ready yet — poll until it is
-          const poll = setInterval(() => {
-            if (injectCSSIntoYTFrame()) {
-              clearInterval(poll);
-              setInterval(injectCSSIntoYTFrame, 2000);
+            // Show black overlay on video end to hide YouTube's suggested videos
+            const endscreen = document.getElementById('endscreen-overlay');
+            if (s === 0) {
+                endscreen.classList.add('visible');
+            } else {
+                endscreen.classList.remove('visible');
             }
-          }, 200);
+
+            if (s === 1) {
+                timer = setInterval(() => {
+                    try {
+                        document.title =
+                            "ytplayer://onCurrentTimeChange?data=" +
+                            player.getCurrentTime();
+                    } catch (e) {}
+                }, 200);
+                try {
+                    const d = player.getDuration();
+                    if (d > 0)
+                        document.title = "ytplayer://onVideoDuration?data=" + d;
+                } catch (e) {}
+            }
         }
-      }
 
-      function onYouTubeIframeAPIReady() {
-        player = new YT.Player("youTubePlayer", {
-          width: "100%",
-          height: "100%",
-          playerVars: {
-            autoplay: 1,
-            controls: 0,
-            cc_load_policy: 0,
-            fs: 1,
-            iv_load_policy: 3,
-            rel: 0,
-            enablejsapi: 1,
-            mute: 1,
-            playsinline: 1,
-            origin: location.origin,
-            modestbranding: 1,
-            disablekb: 1,
-            showinfo: 0,
-          },
-          events: {
-            onReady: (e) => {
-              document.title = "ytplayer://onReady";
-              if (videoId) loadVideo(videoId, startAt);
-              // Start hiding after player is ready
-              startHideLoop();
-            },
-            onStateChange: (e) => stateChanged(e.data),
-            onError: (e) =>
-              (document.title = "ytplayer://onError?data=" + e.data),
-          },
-        });
-      }
-
-      function stateChanged(s) {
-        clearInterval(timer);
-        document.title = "ytplayer://onStateChange?data=" + (STATES[s] || "");
-        if (s === 1) {
-          timer = setInterval(() => {
-            try {
-              document.title =
-                "ytplayer://onCurrentTimeChange?data=" +
-                player.getCurrentTime();
-            } catch (e) {}
-          }, 200);
-          try {
-            const d = player.getDuration();
-            if (d > 0)
-              document.title = "ytplayer://onVideoDuration?data=" + d;
-          } catch (e) {}
+        function loadVideo(id, sec) {
+            // Hide endscreen when new video loads
+            document.getElementById('endscreen-overlay').classList.remove('visible');
+            if (player && player.loadVideoById) {
+                player.loadVideoById(id, sec || 0);
+                document.title = "ytplayer://onVideoId?data=" + id;
+            }
         }
-        // Re-inject on every state change (pause overlay appears on pause, etc.)
-        injectCSSIntoYTFrame();
-      }
 
-      function loadVideo(id, sec) {
-        if (player && player.loadVideoById) {
-          player.loadVideoById(id, sec || 0);
-          document.title = "ytplayer://onVideoId?data=" + id;
+        function playVideo() {
+            if (player && player.playVideo) player.playVideo();
         }
-      }
 
-      function playVideo() {
-        if (player && player.playVideo) player.playVideo();
-      }
+        function pauseVideo() {
+            if (player && player.pauseVideo) player.pauseVideo();
+        }
 
-      function pauseVideo() {
-        if (player && player.pauseVideo) player.pauseVideo();
-      }
+        function seekTo(s) {
+            if (player && player.seekTo) player.seekTo(s, true);
+        }
 
-      function seekTo(s) {
-        if (player && player.seekTo) player.seekTo(s, true);
-      }
+        function mute() {
+            if (player && player.mute) player.mute();
+        }
 
-      function mute() {
-        if (player && player.mute) player.mute();
-      }
+        function unMute() {
+            if (player && player.unMute) player.unMute();
+        }
 
-      function unMute() {
-        if (player && player.unMute) player.unMute();
-      }
+        function setVolume(volumePercent) {}
 
-      function setVolume(volumePercent) {
-        // your existing implementation
-      }
-
-      function setPlaybackRate(r) {
-        if (player && player.setPlaybackRate) player.setPlaybackRate(r);
-      }
-        </script>
-    </body>
+        function setPlaybackRate(r) {
+            if (player && player.setPlaybackRate) player.setPlaybackRate(r);
+        }
+    </script>
+</body>
 </html>
