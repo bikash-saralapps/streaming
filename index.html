@@ -1,109 +1,120 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+    }
 
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1.0"
-    />
+    /* Container clips the iframe to hide YouTube's title bar */
+    #player-container {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      position: relative;
+    }
 
-    <style>
-      html,
-      body {
-        margin: 0;
-        width: 100%;
-        height: 100%;
-        overflow: hidden;
-        background: #000;
-      }
+    #player {
+      position: absolute;
+      top: -70px;  /* Shift up to hide YouTube's title overlay */
+      left: 0;
+      width: 100%;
+      height: calc(100% + 70px);  /* Compensate for the offset */
+    }
 
-      #player {
-        width: 100%;
-        height: 100%;
-      }
+    iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+    }
 
-      iframe {
-        width: 100%;
-        height: 100%;
-        border: none;
-        pointer-events: none;
-      }
+    .loading-bg {
+      position: fixed;
+      inset: 0;
+      background: black;
+      z-index: 9999;
+      transition: opacity 0.25s ease;
+    }
 
-      /* fake loading bg */
-      .loading-bg {
-        position: fixed;
-        inset: 0;
-        background: black;
-        z-index: 999;
-        transition: opacity 0.4s ease;
-      }
+    .loading-bg.hide {
+      opacity: 0;
+      pointer-events: none;
+    }
 
-      .loading-bg.hide {
-        opacity: 0;
-        pointer-events: none;
-      }
-    </style>
-
-    <script src="https://www.youtube.com/iframe_api"></script>
-  </head>
-
-  <body>
-    <div class="loading-bg" id="loading"></div>
-
+    .touch-block {
+      position: fixed;
+      inset: 0;
+      z-index: 9998;
+      background: transparent;
+    }
+  </style>
+  <script src="https://www.youtube.com/iframe_api"></script>
+</head>
+<body>
+  <div class="loading-bg" id="loading"></div>
+  <div id="player-container">
     <div id="player"></div>
+  </div>
+  <div class="touch-block"></div>
+  <script>
+    let player;
+    let loadingHidden = false;
 
-    <script>
-      let player;
-
-      function onYouTubeIframeAPIReady() {
-        player = new YT.Player("player", {
-          videoId: "_VOdGlyXYqw",
-
-          playerVars: {
-            autoplay: 1,
-            controls: 0,
-            modestbranding: 1,
-            rel: 0,
-            showinfo: 0,
-            fs: 0,
-            disablekb: 1,
-            iv_load_policy: 3,
-            playsinline: 1,
-            mute: 1,
-          },
-
-          events: {
-            onReady: function (event) {
-              event.target.playVideo();
-
-              // remove black flash fast
-              setTimeout(() => {
-                document
-                  .getElementById("loading")
-                  .classList.add("hide");
-              }, 300);
-
-              // try unmute after user interaction
-              document.body.addEventListener(
-                "click",
-                () => {
-                  player.unMute();
-                  player.setVolume(100);
-                },
-                { once: true }
-              );
-            },
-
-            onStateChange: function (event) {
-              // keeps video looping
-              if (event.data === YT.PlayerState.ENDED) {
-                player.playVideo();
-              }
-            },
-          },
-        });
+    function hideLoading() {
+      if (!loadingHidden) {
+        loadingHidden = true;
+        document.getElementById("loading").classList.add("hide");
       }
-    </script>
-  </body>
+    }
+
+    function onYouTubeIframeAPIReady() {
+      player = new YT.Player("player", {
+        videoId: "_VOdGlyXYqw",
+        playerVars: {
+          autoplay: 1,
+          controls: 0,
+          modestbranding: 1,
+          rel: 0,
+          fs: 0,
+          disablekb: 1,
+          iv_load_policy: 3,
+          playsinline: 1,
+          mute: 1,
+        },
+        events: {
+          onReady: function (event) {
+            event.target.playVideo();
+            // Hide loading after video starts
+            setTimeout(hideLoading, 150);
+          },
+          onStateChange: function (event) {
+            // Auto loop
+            if (event.data === YT.PlayerState.ENDED) {
+              player.playVideo();
+            }
+            // If paused (someone managed to pause), auto-resume
+            if (event.data === YT.PlayerState.PAUSED) {
+              // Small delay then resume - this handles the overlay briefly showing
+              setTimeout(() => {
+                if (player && player.getPlayerState() === YT.PlayerState.PAUSED) {
+                  player.playVideo();
+                }
+              }, 50);
+            }
+            // Hide loading once video is actually playing
+            if (event.data === YT.PlayerState.PLAYING) {
+              hideLoading();
+            }
+          },
+        },
+      });
+    }
+  </script>
+</body>
 </html>
