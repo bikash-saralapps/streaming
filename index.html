@@ -1,40 +1,118 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta name="referrer" content="strict-origin-when-cross-origin">
-    <style>
-        html, body {
-            width: 100%;
-            height: 100%;
-            margin: 0;
-            padding: 0;
-            background: #000;
-            overflow: hidden;
-        }
-        #youTubePlayer {
-            width: 100%;
-            height: 100%;
-        }
-    </style>
-    <script src="https://www.youtube.com/iframe_api" async></script>
-</head>
-<body>
-    <div id="youTubePlayer"></div>
-    <script>
-        const q = new URLSearchParams(location.search);
-        const videoId = q.get("videoId") || "";
-        const startAt = parseFloat(q.get("start") || "0");
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
 
-        const STATES = {
-            [-1]: "UNSTARTED",
-            0: "ENDED",
-            1: "PLAYING",
-            2: "PAUSED",
-            3: "BUFFERING",
-            5: "CUED",
-        };
+    <style>
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        background: black;
+        overflow: hidden;
+      }
+
+      #youTubePlayer {
+        width: 100%;
+        height: 100%;
+        pointer-events: none; /* blocks hover UI */
+      }
+    </style>
+
+    <script src="https://www.youtube.com/iframe_api"></script>
+  </head>
+
+  <body>
+    <div id="youTubePlayer"></div>
+
+    <script>
+      const videoId = "_VOdGlyXYqw";
+      let player;
+
+      // :fire: ultra-aggressive UI hiding CSS
+      const HIDE_CSS = `
+    .ytp-chrome-top,
+    .ytp-chrome-bottom,
+    .ytp-gradient-top,
+    .ytp-gradient-bottom,
+    .ytp-watermark,
+    .ytp-title,
+    .ytp-title-text,
+    .ytp-title-channel,
+    .ytp-show-cards-title,
+    .ytp-ce-element,
+    .ytp-ce-covering-overlay,
+    .ytp-endscreen-content,
+    .ytp-pause-overlay,
+    .ytp-cued-thumbnail-overlay,
+    .ytp-large-play-button,
+    .ytp-share-button,
+    .ytp-watch-later-button,
+    .ytp-overflow-button,
+    .ytp-progress-bar-container {
+      display: none !important;
+      opacity: 0 !important;
+      pointer-events: none !important;
+    }
+  `;
+
+      function injectCSS() {
+        try {
+          const iframe = document.querySelector("#youTubePlayer iframe");
+          if (!iframe) return;
+
+          const doc = iframe.contentDocument || iframe.contentWindow.document;
+          if (!doc || doc.getElementById("clean-style")) return;
+
+          const style = document.createElement("style");
+          style.id = "clean-style";
+          style.textContent = HIDE_CSS;
+
+          doc.head.appendChild(style);
+        } catch (e) {
+          // cross-origin safe fallback (ignore errors)
+        }
+      }
+
+      function onYouTubeIframeAPIReady() {
+        player = new YT.Player("youTubePlayer", {
+          videoId: videoId,
+
+          playerVars: {
+            autoplay: 1,
+            controls: 0,
+            disablekb: 1,
+            fs: 0,
+            rel: 0,
+            modestbranding: 1,
+            iv_load_policy: 3,
+            playsinline: 1,
+            cc_load_policy: 0,
+          },
+
+          events: {
+            onReady: () => {
+              player.mute();
+              player.playVideo();
+
+              // start cleaning loop
+              setTimeout(() => {
+                injectCSS();
+                setInterval(injectCSS, 2000);
+              }, 1000);
+            },
+          },
+        });
+      }
+    </script>
+  </body>
+</html>        };
 
         let player, timer;
         let cssInjected = false;
