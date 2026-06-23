@@ -1,146 +1,141 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta
-      name="viewport"
-      content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover"
-    />
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover" />
 
-    <style>
-      *,
-      *::before,
-      *::after {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-      }
+<style>
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
 
-      html,
-      body {
-        width: 100%;
-        height: 100%;
-        overflow: hidden;
-        background: #000;
-        position: fixed;
-        inset: 0;
-      }
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  position: fixed;
+  inset: 0;
+}
 
-      #app {
-        width: 100%;
-        height: 100%;
-        position: relative;
-        background: #000;
-      }
+#app {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  background: #000;
+}
 
-      iframe {
-        width: 100%;
-        height: 100%;
-        border: none;
-        pointer-events: none;
-      }
+iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  pointer-events: none;
+}
 
-      /* black flash remover */
-      #loadingOverlay {
-        position: fixed;
-        inset: 0;
-        background: #000;
-        z-index: 9999;
-        transition: opacity 0.25s ease;
-      }
+#loadingOverlay {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  z-index: 9999;
+  transition: opacity 0.25s ease;
+}
 
-      #loadingOverlay.hidden {
-        opacity: 0;
-      }
+#loadingOverlay.hidden {
+  opacity: 0;
+}
 
-      /* blocks taps so UI never reappears */
-      #touchShield {
-        position: fixed;
-        inset: 0;
-        z-index: 9998;
-        background: transparent;
-      }
-    </style>
+#touchShield {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  background: transparent;
+}
+</style>
 
-    <script src="https://www.youtube.com/iframe_api"></script>
-  </head>
+<script src="https://www.youtube.com/iframe_api"></script>
+</head>
 
-  <body>
-    <div id="app"></div>
-    <div id="loadingOverlay"></div>
-    <div id="touchShield"></div>
+<body>
 
-    <script>
-      (function () {
-        const VIDEO_ID = "_VOdGlyXYqw";
+<div id="app"></div>
+<div id="loadingOverlay"></div>
+<div id="touchShield"></div>
 
-        let player;
-        let loadingHidden = false;
+<script>
+(function () {
 
-        const loading = document.getElementById("loadingOverlay");
+  const VIDEO_ID = "_VOdGlyXYqw";
 
-        function hideLoading() {
-          if (loadingHidden) return;
-          loadingHidden = true;
-          loading.classList.add("hidden");
-        }
+  let player;
+  let loadingHidden = false;
 
-        function createPlayer() {
-          const div = document.createElement("div");
-          div.id = "player";
-          document.getElementById("app").appendChild(div);
+  const loading = document.getElementById("loadingOverlay");
 
-          player = new YT.Player("player", {
-            videoId: VIDEO_ID,
+  function hideLoading() {
+    if (loadingHidden) return;
+    loadingHidden = true;
+    loading.classList.add("hidden");
+  }
 
-            playerVars: {
-              autoplay: 1,
-              controls: 0,
-              rel: 0,
-              fs: 0,
-              disablekb: 1,
-              iv_load_policy: 3,
-              playsinline: 1,
-              mute: 1,
-            },
+  function createPlayer() {
+    const div = document.createElement("div");
+    div.id = "player";
+    document.getElementById("app").appendChild(div);
 
-            events: {
-              onReady: (e) => {
-                e.target.playVideo();
-                setTimeout(hideLoading, 150);
-              },
+    player = new YT.Player("player", {
+      videoId: VIDEO_ID,
 
+      playerVars: {
+        autoplay: 1,
+        controls: 0,
+        rel: 0,
+        fs: 0,
+        disablekb: 1,
+        iv_load_policy: 3,
+        playsinline: 1,
+        mute: 1
+      },
 
+      events: {
+        onReady: (e) => {
+          e.target.playVideo();
+          setTimeout(hideLoading, 150);
+        },
 
-              onStateChange: (e) => {
-                // loop video
-                if (e.data === YT.PlayerState.ENDED) {
-                  player.playVideo();
-                }
+        onStateChange: (e) => {
 
-                // only act ON FIRST PLAY
-                if (e.data === YT.PlayerState.PLAYING) {
-                  hideLoading();
-                }
+          // LOOP VIDEO
+          if (e.data === YT.PlayerState.ENDED) {
+            player.playVideo();
+          }
 
-                // IMPORTANT:
-                // DO NOT handle PAUSED anymore
-                // (this is what causes title UI to reappear)
-              },
+          // ONLY FIRST PLAY HIDES TITLE
+          if (e.data === YT.PlayerState.PLAYING) {
+            hideLoading();
+          }
 
-            },
+          // ❌ DO NOT handle PAUSED (prevents title reappearing)
+        }
+      }
+    });
 
-          });
-        }
-        setInterval(() => {
-  const state = player?.getPlayerState?.();
-  if (state === YT.PlayerState.PAUSED) {
-    player.playVideo();
-  }
-}, 500);
+    // 🔥 FORCE PREVENT PAUSE UI REAPPEAR EFFECT
+    setInterval(() => {
+      if (player && player.getPlayerState &&
+          player.getPlayerState() === YT.PlayerState.PAUSED) {
+        player.playVideo();
+      }
+    }, 500);
+  }
 
-        window.onYouTubeIframeAPIReady = createPlayer;
-      })();
-    </script>
-  </body>
+  window.onYouTubeIframeAPIReady = createPlayer;
+
+})();
+</script>
+
+</body>
 </html>
