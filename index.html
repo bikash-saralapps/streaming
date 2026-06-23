@@ -1,195 +1,160 @@
 <!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-        <meta name="referrer" content="strict-origin-when-cross-origin">
-        <style>
-      html, body {
-        width: 100%;
-        height: 100%;
-        margin: 0;
-        padding: 0;
-        background: #000;
-        overflow: hidden;
-      }
-      #youTubePlayer {
-        width: 100%;
-        height: 100%;
-      }
-        </style>
-        <script src="https://www.youtube.com/iframe_api" async></script>
-    </head>
-    <body>
-        <div id="youTubePlayer"></div>
-        <script>
-      const q = new URLSearchParams(location.search);
-      const videoId = q.get("videoId") || "";
-      const startAt = parseFloat(q.get("start") || "0");
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
-      const STATES = {
-        [-1]: "UNSTARTED",
-        0: "ENDED",
-        1: "PLAYING",
-        2: "PAUSED",
-        3: "BUFFERING",
-        5: "CUED",
-      };
+<style>
+html, body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  background: #000;
+  overflow: hidden;
+}
 
-      let player, timer;
-      // let lastVolume = -1;
-      // let lastMuted = null;
-      // let volumeDebounceTimer = null;
+#youTubePlayer {
+  width: 100%;
+  height: 100%;
+}
 
-      function onYouTubeIframeAPIReady() {
-        player = new YT.Player("youTubePlayer", {
-          width: "100%",
-          height: "100%",
-          playerVars: {
-            autoplay: 1,
-            controls: 0,
-            cc_load_policy: 0,
-            fs: 1,
-            iv_load_policy: 3,
-            rel: 0,
-            enablejsapi: 1,
-            mute: 1,
-            playsinline: 1,
-            origin: location.origin,
-            modestbranding: 1,
-            disablekb: 1,
-            showinfo: 0,
-          },
-          events: {
-            onReady: () => {
-              document.title = "ytplayer://onReady";
-              if (videoId) loadVideo(videoId, startAt);
-            },
-            onStateChange: (e) => stateChanged(e.data),
-            onError: (e) =>
-              (document.title = "ytplayer://onError?data=" + e.data),
-          },
-        });
-      }
+/* 🔥 ultra-fast overlay (blocks ALL title flash) */
+#overlay {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  z-index: 9999;
+  opacity: 1;
+  transition: opacity 0.15s ease;
+}
 
-      function attemptHide() {
-        try {
-            var playerFrame = document.getElementById('youTubePlayer');
-            if (playerFrame && playerFrame.contentDocument) {
-                var playerFrameDocument = playerFrame.contentDocument;
+#overlay.hide {
+  opacity: 0;
+}
+</style>
 
-                var hideControlsCSS = `
-                    .ytp-chrome-top, .ytp-chrome-bottom, .ytp-show-cards-title, .ytp-ce-element, .ytp-title, .ytp-gradient-top, .ytp-gradient-bottom, .ytp-watermark, .ytp-pause-overlay, .ytp-cued-thumbnail-overlay {
-                        display: none !important;
-                    }
-                    .ytp-title-link {
-                        display: none !important;
-                    }
-                `;
+<script src="https://www.youtube.com/iframe_api"></script>
+</head>
 
-                var styleElement = document.createElement('style');
-                styleElement.type = 'text/css';
-                styleElement.appendChild(document.createTextNode(hideControlsCSS));
+<body>
 
-                playerFrameDocument.head.appendChild(styleElement);
-            }
-        } catch (e) {
-            setTimeout(attemptHide, 100);
-        }
+<div id="youTubePlayer"></div>
+<div id="overlay"></div>
+
+<script>
+const q = new URLSearchParams(location.search);
+const videoId = q.get("videoId") || "";
+const startAt = parseFloat(q.get("start") || "0");
+
+const STATES = {
+  [-1]: "UNSTARTED",
+  0: "ENDED",
+  1: "PLAYING",
+  2: "PAUSED",
+  3: "BUFFERING",
+  5: "CUED",
+};
+
+let player;
+let overlay = document.getElementById("overlay");
+let started = false;
+
+function hideOverlayFast() {
+  overlay.classList.add("hide");
+  setTimeout(() => {
+    overlay.style.display = "none";
+  }, 150);
+}
+
+window.onYouTubeIframeAPIReady = function () {
+  player = new YT.Player("youTubePlayer", {
+    width: "100%",
+    height: "100%",
+    playerVars: {
+      autoplay: 1,
+      controls: 0,
+      rel: 0,
+      fs: 1,
+      iv_load_policy: 3,
+      playsinline: 1,
+      mute: 1,
+      disablekb: 1,
+      modestbranding: 1
+    },
+
+    events: {
+      onReady: () => {
+        document.title = "ytplayer://onReady";
+        if (videoId) loadVideo(videoId, startAt);
+
+        // 🔥 INSTANT autoplay attempts
+        tryPlay();
+        setTimeout(tryPlay, 150);
+        setTimeout(tryPlay, 500);
+      },
+
+      onStateChange: (e) => stateChanged(e.data),
+
+      onError: (e) =>
+        document.title = "ytplayer://onError?data=" + e.data
     }
+  });
 
-      function stateChanged(s) {
-        clearInterval(timer);
-        document.title = "ytplayer://onStateChange?data=" + (STATES[s] || "");
-        if (s === 1) {
-          timer = setInterval(() => {
-            try {
-              document.title =
-                "ytplayer://onCurrentTimeChange?data=" +
-                player.getCurrentTime();
-            } catch (e) {}
-          }, 200);
-          try {
-            const d = player.getDuration();
-            if (d > 0)
-              document.title = "ytplayer://onVideoDuration?data=" + d;
-          } catch (e) {}
-        }
-      }
+  // 🔥 hidden tap fallback (guaranteed mobile unlock)
+  document.body.addEventListener("touchstart", tryPlay, { once: true });
+};
 
-      function loadVideo(id, sec) {
-        if (player && player.loadVideoById) {
-          player.loadVideoById(id, sec || 0);
-          document.title = "ytplayer://onVideoId?data=" + id;
-        }
-      }
+function tryPlay() {
+  if (!player || started) return;
 
-      function playVideo() {
-        if (player && player.playVideo) player.playVideo();
-      }
+  try {
+    player.mute();
+    player.playVideo();
+    started = true;
+    hideOverlayFast(); // 🔥 fastest possible title removal
+  } catch (e) {}
+}
 
-      function pauseVideo() {
-        if (player && player.pauseVideo) player.pauseVideo();
-      }
+function stateChanged(s) {
+  document.title = "ytplayer://onStateChange?data=" + (STATES[s] || "");
 
-      function seekTo(s) {
-        if (player && player.seekTo) player.seekTo(s, true);
-      }
+  // 🔥 PLAYING → instantly hide overlay again (kills title flash)
+  if (s === 1) {
+    hideOverlayFast();
 
-      function mute() {
-        if (player && player.mute) player.mute();
-      }
+    setInterval(() => {
+      try {
+        document.title =
+          "ytplayer://onCurrentTimeChange?data=" +
+          player.getCurrentTime();
+      } catch (e) {}
+    }, 300);
+  }
 
-      function unMute() {
-        if (player && player.unMute) player.unMute();
-      }
+  // 🔥 LOOP VIDEO
+  if (s === 0) {
+    player.playVideo();
+  }
 
-          
-      function setVolume(volumePercent) {
-      //   try {
-      //     if (!player || typeof player.setVolume !== "function") return;
-      
-      //     let v = Number(volumePercent);
-      //     if (isNaN(v)) return;
-      
-      //     // Clamp 0–100
-      //     v = Math.max(0, Math.min(100, Math.round(v)));
-      
-      //     // If same value as last applied, ignore
-      //     if (v === lastVolume) return;
-      
-      //     // Clear any pending debounce
-      //     if (volumeDebounceTimer) {
-      //       clearTimeout(volumeDebounceTimer);
-      //       volumeDebounceTimer = null;
-      //     }
-      
-      //     // Debounce application — only apply after user stops dragging (~100ms)
-      //     volumeDebounceTimer = setTimeout(() => {
-      //       try {
-      //         lastVolume = v;
-      //         player.setVolume(v);
-      
-      //         const shouldBeMuted = v === 0;
-      //         if (shouldBeMuted !== lastMuted) {
-      //           lastMuted = shouldBeMuted;
-      //           if (shouldBeMuted && typeof player.mute === "function") player.mute();
-      //           else if (!shouldBeMuted && typeof player.unMute === "function") player.unMute();
-      //         }
-      
-      //       } catch (e) {
-      //         console.warn("Debounced setVolume error", e);
-      //       }
-      //     }, 100); // 100 ms delay — adjust if needed
-      
-      //   } catch (e) {
-      //     console.warn("setVolume error", e);
-      //   }
-      }
+  // 🔥 IMPORTANT FIX:
+  // If PAUSED → instantly resume (prevents title UI reappearing)
+  if (s === 2) {
+    hideOverlayFast(); // keep screen black during state switch
 
-      function setPlaybackRate(r) {
-        if (player && player.setPlaybackRate) player.setPlaybackRate(r);
-      }
-        </script>
-    </body>
+    setTimeout(() => {
+      try {
+        player.playVideo();
+      } catch (e) {}
+    }, 80);
+  }
+}
+
+function loadVideo(id, sec) {
+  if (player && player.loadVideoById) {
+    player.loadVideoById(id, sec || 0);
+  }
+}
+</script>
+
+</body>
 </html>
