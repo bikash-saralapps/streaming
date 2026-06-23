@@ -13,28 +13,209 @@
             background: #000;
             overflow: hidden;
         }
-
-        #player-container {
-            position: relative;
-            width: 100%;
-            height: 100%;
-        }
-
         #youTubePlayer {
             width: 100%;
             height: 100%;
-            position: absolute;
-            top: 0;
-            left: 0;
+        }
+    </style>
+    <script src="https://www.youtube.com/iframe_api" async></script>
+</head>
+<body>
+    <div id="youTubePlayer"></div>
+    <script>
+        const q = new URLSearchParams(location.search);
+        const videoId = q.get("videoId") || "";
+        const startAt = parseFloat(q.get("start") || "0");
+
+        const STATES = {
+            [-1]: "UNSTARTED",
+            0: "ENDED",
+            1: "PLAYING",
+            2: "PAUSED",
+            3: "BUFFERING",
+            5: "CUED",
+        };
+
+        let player, timer;
+        let cssInjected = false;
+
+        const HIDE_CSS = `
+            .ytp-chrome-top,
+            .ytp-gradient-top,
+            .ytp-title,
+            .ytp-title-text,
+            .ytp-title-link,
+            .ytp-chrome-bottom,
+            .ytp-gradient-bottom,
+            .ytp-watermark,
+            .ytp-pause-overlay,
+            .ytp-pause-overlay-container,
+            .ytp-cued-thumbnail-overlay,
+            .ytp-cued-thumbnail-overlay-image,
+            .ytp-endscreen-content,
+            .ytp-ce-element,
+            .ytp-ce-covering-overlay,
+            .ytp-cards-teaser,
+            .ytp-cards-button,
+            .ytp-large-play-button,
+            .ytp-share-button,
+            .ytp-watch-later-button,
+            .ytp-chrome-top-buttons,
+            .ytp-show-cards-title,
+            .ytp-autonav-endscreen-upnext-container,
+            .ytp-overflow-button,
+            .ytm-video-info-video-details-container,
+            .fullscreen-action-menu,
+            .ytwPlayerMiddleControlsHost,
+            .player-controls-middle,
+            .prevent-controls-collision,
+            .player-controls,
+            .player-overlay,
+            .player-controls-top,
+            .player-controls-bottom {
+                display: none !important;
+                opacity: 0 !important;
+                visibility: hidden !important;
+            }
+        `;
+
+        function injectCSS() {
+            const iframe = document.querySelector('#youTubePlayer iframe');
+            if (!iframe) {
+                setTimeout(injectCSS, 300);
+                return;
+            }
+
+            try {
+                const doc = iframe.contentDocument || iframe.contentWindow.document;
+                if (!doc || doc.readyState !== 'complete') {
+                    setTimeout(injectCSS, 300);
+                    return;
+                }
+
+                // Remove old style if exists, re-inject fresh
+                const existing = doc.getElementById('yt-hide-css');
+                if (existing) existing.remove();
+
+                const style = doc.createElement('style');
+                style.id = 'yt-hide-css';
+                style.textContent = HIDE_CSS;
+                doc.head.appendChild(style);
+
+                cssInjected = true;
+
+            } catch (e) {
+                console.warn('Injection failed, retrying...', e.message);
+                cssInjected = false;
+                setTimeout(injectCSS, 300);
+            }
         }
 
-        /* All overlay blocks: pointer-events none so taps still reach the iframe */
+        function onYouTubeIframeAPIReady() {
+            player = new YT.Player("youTubePlayer", {
+                width: "100%",
+                height: "100%",
+                playerVars: {
+                    autoplay: 1,
+                    controls: 0,
+                    cc_load_policy: 0,
+                    fs: 1,
+                    iv_load_policy: 3,
+                    rel: 0,
+                    enablejsapi: 1,
+                    mute: 1,
+                    playsinline: 1,
+                    origin: location.origin,
+                    modestbranding: 1,
+                    disablekb: 1,
+                    showinfo: 0,
+                },
+                events: {
+                    onReady: (e) => {
+                        document.title = "ytplayer://onReady";
+                        if (videoId) loadVideo(videoId, startAt);
+                    },
+                    onStateChange: (e) => {
+                        stateChanged(e.data);
 
-        /* Top bar: video title + channel name */
-        .overlay-top {
-            position: absolute;
-            top: 0;
-            left: 0;
+                        // First time playing — inject CSS
+                        if (e.data === 1 && !cssInjected) {
+                            injectCSS();
+                        }
+
+                        // On pause — re-inject because pause overlay appears fresh
+                        if (e.data === 2) {
+                            cssInjected = false;
+                            injectCSS();
+                        }
+
+                        // On buffering — re-inject
+                        if (e.data === 3) {
+                            cssInjected = false;
+                            injectCSS();
+                        }
+                    },
+                    onError: (e) =>
+                        (document.title = "ytplayer://onError?data=" + e.data),
+                },
+            });
+        }
+
+        function stateChanged(s) {
+            clearInterval(timer);
+            document.title = "ytplayer://onStateChange?data=" + (STATES[s] || "");
+            if (s === 1) {
+                timer = setInterval(() => {
+                    try {
+                        document.title =
+                            "ytplayer://onCurrentTimeChange?data=" +
+                            player.getCurrentTime();
+                    } catch (e) {}
+                }, 200);
+                try {
+                    const d = player.getDuration();
+                    if (d > 0)
+                        document.title = "ytplayer://onVideoDuration?data=" + d;
+                } catch (e) {}
+            }
+        }
+
+        function loadVideo(id, sec) {
+            cssInjected = false;
+            if (player && player.loadVideoById) {
+                player.loadVideoById(id, sec || 0);
+                document.title = "ytplayer://onVideoId?data=" + id;
+            }
+        }
+
+        function playVideo() {
+            if (player && player.playVideo) player.playVideo();
+        }
+
+        function pauseVideo() {
+            if (player && player.pauseVideo) player.pauseVideo();
+        }
+
+        function seekTo(s) {
+            if (player && player.seekTo) player.seekTo(s, true);
+        }
+
+        function mute() {
+            if (player && player.mute) player.mute();
+        }
+
+        function unMute() {
+            if (player && player.unMute) player.unMute();
+        }
+
+        function setVolume(volumePercent) {}
+
+        function setPlaybackRate(r) {
+            if (player && player.setPlaybackRate) player.setPlaybackRate(r);
+        }
+    </script>
+</body>
+</html>            left: 0;
             right: 0;
             height: 60px;
             background: #000;
